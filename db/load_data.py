@@ -3,6 +3,7 @@ Database setup script to load movie datasets into PostgreSQL
 """
 import os
 import json
+import ast
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
@@ -23,6 +24,48 @@ DB_NAME = os.getenv("DB_NAME", "movie_bot")
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), "../datasets")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+
+def get_db():
+    """Dependency for getting database session"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def convert_string_to_json(value):
+    """
+    Convert string representation of list/dict to valid JSON string
+    Handles Python dict strings with single quotes to valid JSON
+    """
+    if pd.isna(value) or value is None:
+        return '[]'
+    
+    if isinstance(value, str):
+        if not value or value == '[]' or value == '{}':
+            return '[]' if value == '[]' else '{}'
+        
+        try:
+            # Try to parse as Python literal (handles single quotes)
+            parsed = ast.literal_eval(value)
+            # Convert back to JSON string (with double quotes)
+            return json.dumps(parsed)
+        except (ValueError, SyntaxError):
+            # If parsing fails, try treating as JSON
+            try:
+                json.loads(value)
+                return value
+            except:
+                logger.warning(f"Could not parse JSON value: {value[:50]}")
+                return '[]'
+    
+    # If it's already a dict/list, convert to JSON
+    try:
+        return json.dumps(value)
+    except:
+        return '[]'
 
 
 def create_database():
@@ -154,11 +197,11 @@ def load_movies(engine):
         df['vote_average'] = pd.to_numeric(df['vote_average'], errors='coerce')
         df['vote_count'] = pd.to_numeric(df['vote_count'], errors='coerce').astype('Int64')
         
-        # Keep JSON fields as strings for JSONB insertion
+        # Convert JSON fields from string representation to valid JSON
         json_columns = ['genres', 'production_companies', 'production_countries', 'spoken_languages', 'belongs_to_collection']
         for col in json_columns:
             if col in df.columns:
-                df[col] = df[col].fillna('[]')
+                df[col] = df[col].apply(convert_string_to_json)
         
         # Select columns to insert
         columns_to_insert = [
@@ -190,6 +233,12 @@ def load_credits(engine):
         df['id'] = pd.to_numeric(df['id'], errors='coerce').astype('Int64')
         df['movie_id'] = pd.to_numeric(df['id'], errors='coerce').astype('Int64')
         
+        # Convert JSON columns
+        if 'cast' in df.columns:
+            df['cast'] = df['cast'].apply(convert_string_to_json)
+        if 'crew' in df.columns:
+            df['crew'] = df['crew'].apply(convert_string_to_json)
+        
         # Remove duplicates
         df = df.drop_duplicates(subset=['id'])
         df = df[df['id'].notna()]
@@ -210,6 +259,10 @@ def load_keywords(engine):
         df = pd.read_csv(csv_file)
         df['id'] = pd.to_numeric(df['id'], errors='coerce').astype('Int64')
         df['movie_id'] = df['id']
+        
+        # Convert JSON column
+        if 'keywords' in df.columns:
+            df['keywords'] = df['keywords'].apply(convert_string_to_json)
         
         # Remove duplicates
         df = df.drop_duplicates(subset=['id'])
