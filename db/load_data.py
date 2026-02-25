@@ -92,7 +92,7 @@ def create_tables(engine):
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS credits (
                 id BIGINT PRIMARY KEY,
-                cast JSONB,
+                "cast" JSONB,
                 crew JSONB,
                 movie_id BIGINT REFERENCES movies(id) ON DELETE CASCADE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
